@@ -1,5 +1,10 @@
+import curses
+from getters import get_user_credentials
+from curses import wrapper
 import random
 from time import sleep
+from utils import tiny_random_delay
+from utils import big_random_delay
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -8,26 +13,48 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import random
-import os
 from getpass import getpass
 from pynput.keyboard import Listener, Key
+import requests
+from getters import get_timeblock
+from getters import get_chrome_profile_path
 
 slot_check_counter = 0 
 
-def big_random_delay(min=2, max=5):
-    sleep(random.uniform(min, max))
 
+def check_for_slots(driver, day, start_time, end_time, re_enter_flag, stdscr):
+    global slot_check_counter
+    print(f"Checking for available slots on {day} from {start_time} to {end_time}...")
+    if re_enter_flag(): return 
+    if slot_check_counter % 2 == 0:
+        driver.refresh()
+        print("Page refreshed to update slots.")
+    WebDriverWait(driver, 5).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-time]"))
+    )
+    slot_check_counter += 1 
+    try:
+        available_slots_elements = driver.find_elements(By.CSS_SELECTOR, f"[data-date='{day}'] [data-time]")
+        if not available_slots_elements:
+            print("No slots currently displayed for this date.")
+            return
 
-def tiny_random_delay(min=0.2, max=0.5):
-    sleep(random.uniform(min, max))
+        for slot_element in available_slots_elements:
+            if re_enter_flag(): return
+            slot_time_str = slot_element.get_attribute('data-time')
+            if slot_time_str and is_time_in_range(slot_time_str, start_time, end_time):
+                print(f"Attempting to book slot at {slot_time_str}...")
+                slot_element.click()
+                tiny_random_delay()
+                handle_confirmation_popup(driver)
+                print(f"Slot booked at {slot_time_str}")
+                return
+    except NoSuchElementException:
+        print("No available slots found.")
+    except TimeoutException:
+        print("Timeout occurred while waiting for the necessary elements to load.")
 
-def is_time_in_range(slot_time_str, start_time, end_time):
-    slot_time = datetime.strptime(slot_time_str, "%H:%M").time()
-    return start_time <= slot_time <= end_time
-
-
-
-def login(driver, calendar_url, email, password):
+def login(driver, calendar_url, email, password, stdscr):
     print("Navigating to the calendar URL...")
     driver.get(calendar_url)
     big_random_delay()
@@ -37,7 +64,7 @@ def login(driver, calendar_url, email, password):
             print("Already logged in.")
             return True
     except TimeoutException:
-        print("Not already logged in, proceeding with login.")
+        print("Already logged in, proceeding with login.")
 
     try:
         WebDriverWait(driver, 6).until(
@@ -79,51 +106,6 @@ def login(driver, calendar_url, email, password):
         print("Failed to redirect after login.")
         return False
 
-
-def parse_user_timeblock():
-    day_input = input("Enter the day for the booking (e.g., '2024-03-21'): ")
-    start_time_input = input("Enter the start time (HH:MM, 24-hour format): ")
-    end_time_input = input("Enter the end time (HH:MM, 24-hour format): ")
-    day = datetime.strptime(day_input, "%Y-%m-%d").date()
-    start_time = datetime.strptime(start_time_input, "%H:%M").time()
-    end_time = datetime.strptime(end_time_input, "%H:%M").time()
-    return day, start_time, end_time
-
-
-
-
-def check_for_slots(driver, day, start_time, end_time, re_enter_flag):
-    global slot_check_counter
-    print(f"Checking for available slots on {day} from {start_time} to {end_time}...")
-    if re_enter_flag(): return 
-    if slot_check_counter % 2 == 0:
-        driver.refresh()
-        print("Page refreshed to update slots.")
-    WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-time]"))
-    )
-    slot_check_counter += 1 
-    try:
-        available_slots_elements = driver.find_elements(By.CSS_SELECTOR, f"[data-date='{day}'] [data-time]")
-        if not available_slots_elements:
-            print("No slots currently displayed for this date.")
-            return
-
-        for slot_element in available_slots_elements:
-            if re_enter_flag(): return
-            slot_time_str = slot_element.get_attribute('data-time')
-            if slot_time_str and is_time_in_range(slot_time_str, start_time, end_time):
-                print(f"Attempting to book slot at {slot_time_str}...")
-                slot_element.click()
-                tiny_random_delay()
-                handle_confirmation_popup(driver)
-                print(f"Slot booked at {slot_time_str}")
-                return
-
-    except NoSuchElementException:
-        print("No available slots found.")
-
-
 def handle_confirmation_popup(driver):
     try:
         popup = WebDriverWait(driver, 10).until(
@@ -133,43 +115,13 @@ def handle_confirmation_popup(driver):
     except:
         pass  
 
-def find_chrome_profile_path():
-    home_dir = os.path.expanduser("~")
-    chrome_config_path = os.path.join(home_dir, '.config', 'google-chrome')
-    profile_names = ['Profile 4', 'Default', 'Profile 1', 'Profile 2', 'Profile 3']
-
-    for profile_name in profile_names:
-        chrome_profile_dir = os.path.join(chrome_config_path, profile_name)
-        if os.path.exists(chrome_profile_dir):
-            print(f"Found Chrome profile at {chrome_profile_dir}")
-            return chrome_profile_dir
-
-    print(f"No valid Chrome profile directory found in the usual path: {chrome_config_path}")
-    custom_path = input("Please enter the path to your Chrome profile directory or press enter to continue with default: ").strip()
-    if custom_path:
-        if os.path.exists(custom_path):
-            print(f"Found Chrome profile at {custom_path}")
-            return custom_path
-        else:
-            print("The path provided does not exist. Please check the path and try again.")
-            return None
-    else:
-        print("Proceeding with default Chrome configuration...")
-        return None
-
-def get_user_credentials():
-    calendar_url = input("Please enter the calendar URL: ")
-    email = os.getenv('INTRAUSER') or input("Enter INTRAUSER (your username or email): ")
-    password = os.getenv('INTRAPASS') or getpass("Enter INTRAPASS (your password): ")
-    return calendar_url, email, password
-
 def setup_selenium_options():
     options = Options()
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     options.add_experimental_option('useAutomationExtension', False)
-    profile_path = find_chrome_profile_path()
+    profile_path = get_chrome_profile_path()
     if profile_path:
         print(f"Using Chrome profile at {profile_path}")
         options.add_argument(f"user-data-dir={profile_path}")
@@ -177,46 +129,42 @@ def setup_selenium_options():
         print("No valid Chrome profile directory found. Using default configuration...")
     return options
 
-def main():
-    calendar_url, email, password = get_user_credentials()
+def main(stdscr):
+    curses.curs_set(0)
+    curses.cbreak()
+    stdscr.keypad(True)
+    stdscr.nodelay(False)
+    stdscr.clear()
+    calendar_url, email, password = get_user_credentials(stdscr)
+
+    # Initialize Selenium
     options = setup_selenium_options()
     driver = webdriver.Chrome(options=options)
 
-    login_success = login(driver, calendar_url, email, password)
-    re_enter_time_block = False
+    # Attempt login
+    login_success = login(driver, calendar_url, email, password, stdscr)
 
     if login_success:
-        day, start_time, end_time = parse_user_timeblock()
-        print("\nPress 'r' at any time to re-enter the time block.\n")
-        print("It can take a while for selenium to stop !.\n")
+        day, start_time, end_time = get_timeblock(stdscr)
+        stdscr.addstr(14, 0, "Press 'r' at any time to re-enter the time block.")
+        
+        re_enter_time_block = False
 
-        def on_press(key):
-            nonlocal re_enter_time_block
-            if hasattr(key, 'char') and key.char == 'R':
-                print("Re-entering the time block... R pressed !")
-                re_enter_time_block = True
+        while True:
+            try:
+                if stdscr.getch() == ord('r'):
+                    day, start_time, end_time = get_timeblock(stdscr)
 
-        listener = Listener(on_press=on_press)
-        listener.start()
-        try:
-            while True:
-                if re_enter_time_block:
-                    print("Re-entering the time block...")
-                    day, start_time, end_time = parse_user_timeblock()
-                    print("\nUpdated time block. Press 'R' at any time to re-enter the time block.\n")
-                    re_enter_time_block = False
-
-                check_for_slots(driver, day, start_time, end_time, lambda: re_enter_time_block)
-                sleep(1)  # Loop checking delay
-        except Exception as e:
-            print(f"An error occurred: {e}")
+                check_for_slots(driver, day, start_time, end_time, lambda: re_enter_time_block, stdscr)
+                time.sleep(1)  # Loop checking delay
+            except Exception as e:
+                stdscr.addstr(16, 0, f"An error occurred: {e}")
+                break
 
     else:
-        print("Login failed. Please check your credentials or network connection.")
+        stdscr.addstr(16, 0, "Login failed. Please check your credentials or network connection.")
 
     driver.quit()
-    listener.stop()
+    stdscr.getch()  # Wait for user to press a key
 
-
-if __name__ == "__main__":
-    main()
+wrapper(main)
