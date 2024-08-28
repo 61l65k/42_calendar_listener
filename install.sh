@@ -1,13 +1,23 @@
 #!/bin/bash
 
 # Define the repository URL and the directory name
-REPO_URL="https://github.com/4l3xHive/42_calendar_listener.git"
+REPO_URL="https://github.com/61l65k/42_calendar_listener.git"
 DIR_NAME="42_calendar_listener"
 
-# Clone the repository
-echo "Cloning the repository..."
-git clone $REPO_URL
-cd $DIR_NAME
+# Check if the current directory is the target directory
+if [ "${PWD##*/}" == "$DIR_NAME" ]; then
+    echo "You are already in the $DIR_NAME directory."
+else
+    # Clone the repository if the directory does not exist
+    if [ -d "$DIR_NAME" ]; then
+        echo "Directory $DIR_NAME already exists."
+        cd $DIR_NAME
+    else
+        echo "Cloning the repository..."
+        git clone $REPO_URL
+        cd $DIR_NAME
+    fi
+fi
 
 # Check if Python 3 is installed
 if ! command -v python3 &>/dev/null; then
@@ -16,8 +26,10 @@ if ! command -v python3 &>/dev/null; then
 fi
 
 # Create a Python virtual environment
-echo "Setting up the Python virtual environment..."
-python3 -m venv venv
+if [ ! -d "venv" ]; then
+    echo "Setting up the Python virtual environment..."
+    python3 -m venv venv
+fi
 
 # Activate the virtual environment
 echo "Activating the virtual environment..."
@@ -31,4 +43,6 @@ echo "Installation is complete."
 
 echo -e "\n\n To start the listener, run the following command: \n"
 echo -e "source venv/bin/activate && python3 42_calendar.py \n\n"
- 
+
+echo -e "To deactivate the virtual environment, run: \n"
+echo -e "deactivate \n\n"
